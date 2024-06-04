@@ -1,0 +1,390 @@
+---
+title: "Conservation Funding Votes Analysis"
+author: "Guillermo Parra"
+date: "2024-05-28"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(tidytext)
+library(ggplot2)
+
+# Load the dataset
+file_path <- "C:/Users/Guill/OneDrive/Documents/School/RA Stuff/UBC/conservation_funding_votes.csv"
+data <- read_csv(file_path)
+
+# Replace spaces between letters with underscores and then remove all other spaces
+data <- data %>%
+  mutate(
+    purpose_processed = str_replace_all(purpose, "(\\w)\\s+(\\w)", "\\1_\\2"),
+    purpose_processed = str_replace_all(purpose_processed, "\\s+", "")
+  )
+
+# Tokenize and count words in the 'purpose' column
+purpose_word_counts <- data %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE)
+
+# Display the top 10 words in the 'purpose' column
+print(head(purpose_word_counts, 10))
+
+# Calculate relative frequencies for the overall purpose words
+purpose_word_counts <- purpose_word_counts %>%
+  mutate(relative_frequency = n / sum(n))
+
+# Display the top 10 words with relative frequencies in the 'purpose' column
+print(head(purpose_word_counts, 10))
+
+# Analyze the counts for different finance mechanisms
+finance_mechanism_counts <- data %>%
+  count(finance_mechanism, sort = TRUE)
+
+print(finance_mechanism_counts)
+
+# Calculate the relative frequency of each funding mechanism
+total_count <- sum(finance_mechanism_counts$n)
+finance_mechanism_counts <- finance_mechanism_counts %>%
+  mutate(relative_frequency = n / total_count)
+
+# Display the relative frequencies of each funding mechanism
+print(finance_mechanism_counts)
+
+# Combine tax-related finance mechanisms under a general "Tax" category
+data <- data %>%
+  mutate(finance_mechanism_combined = case_when(
+    finance_mechanism %in% c("Property tax", "Sales tax", "Income tax", "Real estate transfer tax") ~ "Tax",
+    TRUE ~ finance_mechanism
+  ))
+
+# Tokenize and count words in the 'purpose' column for each type of tax-funded project
+property_tax_purpose_counts <- data %>%
+  filter(finance_mechanism == "Property tax") %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE) %>%
+  mutate(relative_frequency = n / sum(n))
+
+sales_tax_purpose_counts <- data %>%
+  filter(finance_mechanism == "Sales tax") %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE) %>%
+  mutate(relative_frequency = n / sum(n))
+
+income_tax_purpose_counts <- data %>%
+  filter(finance_mechanism == "Income tax") %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE) %>%
+  mutate(relative_frequency = n / sum(n))
+
+real_estate_transfer_tax_purpose_counts <- data %>%
+  filter(finance_mechanism == "Real estate transfer tax") %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE) %>%
+  mutate(relative_frequency = n / sum(n))
+
+# Display the top 10 words and their relative frequencies for each type of tax-funded project
+print("Property Tax")
+print(head(property_tax_purpose_counts, 10))
+
+print("Sales Tax")
+print(head(sales_tax_purpose_counts, 10))
+
+print("Income Tax")
+print(head(income_tax_purpose_counts, 10))
+
+print("Real Estate Transfer Tax")
+print(head(real_estate_transfer_tax_purpose_counts, 10))
+
+# Tokenize and count words in the 'purpose' column for bond-funded projects
+bond_purpose_counts <- data %>%
+  filter(finance_mechanism_combined == "Bond") %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE) %>%
+  mutate(relative_frequency = n / sum(n))
+
+# Display the top 10 words and their relative frequencies for bond-funded projects
+print("Bond")
+print(head(bond_purpose_counts, 10))
+
+# Tokenize and count words in the 'purpose' column for tax-funded projects (combined)
+tax_purpose_counts <- data %>%
+  filter(finance_mechanism_combined == "Tax") %>%
+  unnest_tokens(word, purpose_processed, token = "regex", pattern = ",") %>%
+  count(word, sort = TRUE) %>%
+  mutate(relative_frequency = n / sum(n))
+
+# Display the top 10 words and their relative frequencies for tax-funded projects
+print("Tax (Combined)")
+print(head(tax_purpose_counts, 10))
+
+# Function to extract acreage from text
+extract_acreage <- function(text) {
+  match <- str_extract(text, "\\b\\d+(?:,\\d+)?\\s*acres?\\b")
+  if (!is.na(match)) {
+    return(as.integer(str_replace_all(match, "[^\\d]", "")))
+  }
+  return(NA)
+}
+
+# Apply the extraction function to the 'description' column
+data <- data %>%
+  mutate(acreage = sapply(description, extract_acreage, USE.NAMES = FALSE))
+
+# Frequency and variation analysis of acreage reporting
+acreage_reported <- data %>%
+  filter(!is.na(acreage)) %>%
+  select(acreage)
+
+# Statistics for reported acreage
+acreage_stats <- summary(acreage_reported$acreage)
+print(acreage_stats)
+
+# Combine tax-related finance mechanisms under a general "Tax" category (already done above)
+
+# Compute the average acreage difference between bond-funded and tax-funded projects
+average_acreage <- data %>%
+  filter(!is.na(acreage)) %>%
+  group_by(finance_mechanism_combined) %>%
+  summarize(average_acreage = mean(acreage))
+print(average_acreage)
+
+# Determine the percentage of projects with reported acreage that are bond-funded vs. tax-funded
+acreage_funding_percentage <- data %>%
+  filter(!is.na(acreage)) %>%
+  count(finance_mechanism_combined) %>%
+  mutate(percentage = n / sum(n) * 100)
+print(acreage_funding_percentage)
+
+# Correlation between acreage size and type of funding
+data_with_acreage <- data %>%
+  filter(!is.na(acreage))
+
+correlation <- cor.test(data_with_acreage$acreage, as.numeric(data_with_acreage$finance_mechanism_combined == "Bond"))
+print(correlation)
+
+# Analyze the distribution of state, municipal, and county-level projects and how they are funded (tax vs. bond)
+project_distribution <- data %>%
+  count(jurisdiction_type, finance_mechanism_combined) %>%
+  group_by(jurisdiction_type) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+# Summarize the data for each jurisdiction type
+project_summary <- project_distribution %>%
+  group_by(jurisdiction_type) %>%
+  summarize(
+    total_projects = sum(n),
+    tax_funded_percentage = sum(n[finance_mechanism_combined == "Tax"]) / sum(n) * 100,
+    bond_funded_percentage = sum(n[finance_mechanism_combined == "Bond"]) / sum(n) * 100
+  )
+
+print(project_summary)
+
+# Project category analysis
+project_category_counts <- data %>%
+  mutate(project_category = case_when(
+    str_detect(purpose_processed, "park|recreation") ~ "Park/Recreation",
+    str_detect(purpose_processed, "wildlife|habitat") ~ "Wildlife Habitat",
+    str_detect(purpose_processed, "trail") ~ "Trail",
+    str_detect(purpose_processed, "farmland") ~ "Farmland",
+    TRUE ~ "Other"
+  )) %>%
+  count(finance_mechanism_combined, project_category) %>%
+  spread(project_category, n, fill = 0)
+
+# Print the results
+print(head(project_category_counts, 10))
+
+# Summarize the data for each jurisdiction type
+project_summary <- project_distribution %>%
+  group_by(jurisdiction_type) %>%
+  summarize(
+    total_projects = sum(n),
+    tax_funded_percentage = sum(n[finance_mechanism_combined == "Tax"]) / sum(n) * 100,
+    bond_funded_percentage = sum(n[finance_mechanism_combined == "Bond"]) / sum(n) * 100
+  )
+
+print(project_summary)
+
+
+
+
+
+
+# Funding Amount Analysis
+funding_stats <- data %>%
+  group_by(finance_mechanism_combined) %>%
+  summarize(
+    average_funding = mean(conservation_funds_at_stake, na.rm = TRUE),
+    median_funding = median(conservation_funds_at_stake, na.rm = TRUE),
+    min_funding = min(conservation_funds_at_stake, na.rm = TRUE),
+    max_funding = max(conservation_funds_at_stake, na.rm = TRUE),
+    first_quartile = quantile(conservation_funds_at_stake, 0.25, na.rm = TRUE),
+    third_quartile = quantile(conservation_funds_at_stake, 0.75, na.rm = TRUE)
+  )
+
+print("Funding Amount Statistics by Finance Mechanism")
+print(funding_stats)
+# Analyze common phrases in the 'description' column
+description_phrases <- data %>%
+  filter(!is.na(description)) %>%
+  unnest_tokens(phrase, description, token = "ngrams", n = 6) %>%
+  filter(!is.na(phrase)) %>%
+  count(finance_mechanism_combined, phrase, sort = TRUE)
+
+print("Top Phrases in Description Column for Bond-Funded Projects")
+print(description_phrases %>% filter(finance_mechanism_combined == "Bond") %>% head(10))
+
+print("Top Phrases in Description Column for Tax-Funded Projects")
+print(description_phrases %>% filter(finance_mechanism_combined == "Tax") %>% head(10))
+
+
+# Calculate the difference between total_funds_at_stake and conservation_funds_at_stake
+data <- data %>%
+  mutate(funding_difference = total_funds_at_stake - conservation_funds_at_stake)
+
+# Filter for non-zero differences
+non_zero_differences <- data %>%
+  filter(funding_difference != 0)
+
+# Summary statistics for non-zero differences
+funding_difference_stats <- summary(non_zero_differences$funding_difference)
+
+# Proportion of times the difference is non-zero by jurisdiction type
+difference_by_jurisdiction <- non_zero_differences %>%
+  group_by(jurisdiction_type) %>%
+  summarize(
+    total_projects = n(),
+    percentage = (n() / nrow(non_zero_differences)) * 100
+  )
+
+print("Proportion of Non-Zero Differences by Jurisdiction Type")
+print(difference_by_jurisdiction)
+
+# Pass rate for projects with non-zero differences
+pass_rate_non_zero_difference <- non_zero_differences %>%
+  group_by(did_vote_pass) %>%
+  summarize(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+print("Pass Rate for Projects with Non-Zero Differences")
+print(pass_rate_non_zero_difference)
+
+# Filter for zero differences
+zero_differences <- data %>%
+  filter(funding_difference == 0)
+
+# Pass rate for projects with zero differences
+pass_rate_zero_difference <- zero_differences %>%
+  group_by(did_vote_pass) %>%
+  summarize(count = n()) %>%
+  mutate(percentage = count / sum(count) * 100)
+
+print("Pass Rate for Projects with Zero Differences")
+print(pass_rate_zero_difference)
+
+
+# Calculate the difference between total_funds_at_stake and conservation_funds_at_stake
+data <- data %>%
+  mutate(funding_difference = total_funds_at_stake - conservation_funds_at_stake)
+
+# Filter for zero differences
+zero_differences <- data %>%
+  filter(funding_difference == 0)
+
+# Proportion of times the difference is zero by jurisdiction type
+difference_by_jurisdiction_zero <- zero_differences %>%
+  group_by(jurisdiction_type) %>%
+  summarize(
+    total_projects = n(),
+    percentage = (n() / nrow(zero_differences)) * 100
+  )
+
+print("Proportion of Zero Differences by Jurisdiction Type")
+print(difference_by_jurisdiction_zero)
+
+
+
+# Calculate the difference between total_funds_at_stake and conservation_funds_at_stake
+data <- data %>%
+  mutate(funding_difference = total_funds_at_stake - conservation_funds_at_stake)
+
+# Filter for non-zero differences
+non_zero_differences <- data %>%
+  filter(funding_difference != 0)
+
+# Summary statistics for non-zero differences
+funding_difference_stats <- summary(non_zero_differences$funding_difference)
+print(funding_difference_stats)
+
+# Create a histogram for the distribution of funding differences
+ggplot(non_zero_differences, aes(x = funding_difference)) +
+  geom_histogram(binwidth = 1000000000, fill = "blue", color = "black", alpha = 0.7) +
+  scale_x_continuous(labels = scales::comma) +
+  labs(
+    title = "Distribution of Funding Differences",
+    x = "Difference Between Conservation Funds and Total Funds",
+    y = "Number of Projects"
+  ) +
+  theme_minimal()
+
+
+
+# Calculate the ratio of non-conservation funds to total funds
+data <- data %>%
+  mutate(non_conservation_ratio = (total_funds_at_stake - conservation_funds_at_stake) / total_funds_at_stake)
+
+# Filter for valid and non-negative ratios (exclude NA, infinite, and negative values)
+valid_ratios <- data %>%
+  filter(!is.na(non_conservation_ratio) & is.finite(non_conservation_ratio) & non_conservation_ratio >= 0)
+
+# Create a histogram for the distribution of non-conservation fund ratios
+histogram_ratio <- ggplot(valid_ratios, aes(x = non_conservation_ratio)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(
+    title = "Distribution of Non-Conservation Fund Ratios",
+    x = "Ratio of Non-Conservation Funds to Total Funds",
+    y = "Number of Projects"
+  ) +
+  theme_minimal()
+
+# Plot the histogram
+print(histogram_ratio)
+
+
+# Analyze common phrases in the 'description' column for "Other" funding mechanism
+other_description_phrases <- data %>%
+  filter(finance_mechanism_combined == "Other" & !is.na(description)) %>%
+  unnest_tokens(phrase, description, token = "ngrams", n = 3) %>%
+  filter(!is.na(phrase)) %>%
+  count(phrase, sort = TRUE)
+
+# Analyze common phrases in the 'other_comment' column for "Other" funding mechanism
+other_comment_phrases <- data %>%
+  filter(finance_mechanism_combined == "Other" & !is.na(other_comment)) %>%
+  unnest_tokens(phrase, other_comment, token = "ngrams", n = 2) %>%
+  filter(!is.na(phrase)) %>%
+  count(phrase, sort = TRUE)
+
+# Analyze common words in the 'other_comment' column for "Other" funding mechanism
+other_comment_words <- data %>%
+  filter(finance_mechanism_combined == "Other" & !is.na(other_comment)) %>%
+  unnest_tokens(phrase, other_comment, token = "ngrams", n = 1) %>%
+  filter(!is.na(phrase)) %>%
+  count(phrase, sort = TRUE)
+
+# Display the top 10 phrases for "Other" funding mechanism in 'description' column
+print("Top Phrases in Description Column for Other-Funded Projects")
+print(other_description_phrases %>% head(10))
+
+# Display the top 10 phrases for "Other" funding mechanism in 'other_comment' column
+print("Top Phrases in Other Comment Column for Other-Funded Projects")
+print(other_comment_phrases %>% head(10))
+
+# Display the top 10 words for "Other" funding mechanism in 'other_comment' column
+print("Top words in Other Comment Column for Other-Funded Projects")
+print(other_comment_words %>% head(10))
